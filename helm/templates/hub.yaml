@@ -1,0 +1,151 @@
+{{- $dataDirectory := "/home/codesonar/hub" }}
+{{- $configDirectory := "/etc/codesonar" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  namespace: {{ .Release.Namespace }}
+  name: {{ include "hub.name" . }}
+  labels:
+    app.kubernetes.io/part-of: codesonar
+    app.kubernetes.io/name: hub
+    app.kubernetes.io/instance: {{ include "hub.name" . }}
+spec:
+  replicas: 1
+  serviceName: {{ include "hub.name" . }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ include "hub.name" . }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: {{ .Values.hub.storage -}}Gi
+          limits:
+            storage: {{ .Values.hub.storage -}}Gi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: codesonar
+        app.kubernetes.io/name: hub
+        app.kubernetes.io/instance: {{ include "hub.name" . }}
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/os: linux
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "hub.name" . }}
+      containers:
+        - name: service
+          image: {{ .Values.hub.image }}
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: {{ .Values.hub.cpu }}
+              memory: {{ .Values.hub.ram }}Gi
+              ephemeral-storage: 300Mi
+            limits:
+              cpu: {{ .Values.hub.cpu }}
+              memory: {{ .Values.hub.ram }}Gi
+              ephemeral-storage: 300Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ NET_RAW ]
+          volumeMounts:
+            - name: data
+              mountPath: {{ $dataDirectory }}
+            - name: config
+              mountPath: {{ $configDirectory }}
+          env:
+            - name: GTHTTP_DONT_VERIFY_HTTPS_HOSTNAME
+              value: "1"
+          workingDir: {{ $dataDirectory }}
+          command:
+            - bash
+            - "-e"
+            - "-c"
+            - |
+              export CSHUB_PASSWORD=$(cat {{ $configDirectory }}/password)
+              if [ ! -d {{ $dataDirectory }}/pgdata ]; then
+                echo -e "Bootstrap configuration via temporary hub instance.\n"
+{{- if .Values.hub.tls_cert }}
+                codesonar hub-start -allow-satellites \
+                  -tls-server-certkey {{ $configDirectory }}/cert \
+                  {{ $dataDirectory }} {{ include "hub.tempListeningAddress" . }}
+{{- else }}
+                codesonar hub-start -allow-satellites \
+                  {{ $dataDirectory }} {{ include "hub.tempListeningAddress" . }}
+{{- end }}
+                echo -e "\nSet initial Hub configuration parameters.\n"
+                /opt/codesonar/third-party/curl/inst/bin/curl -X POST \
+                  -u "Administrator:${CSHUB_PASSWORD}" \
+                  {{ include "hub.tempBaseUri" . }}/settings.html \
+                  -F update_settings=1 -k -o /dev/null \
+{{- if .Values.hub.smtp.enabled }}
+                  -F smtp_host={{ .Values.hub.smtp.host }} \
+                  -F smtp_port={{ .Values.hub.smtp.port }} \
+                  -F smtp_from={{ .Values.hub.smtp.address }} \
+                  -F smtp_use_tls_mode=0 -F smtp_timeout={{ .Values.hub.smtp.timeout }} \
+                  -F smtp_user='' -F smtp_password='' -F smtp_verify='' \
+{{- end }}
+                  -F public_url={{ .Values.hub.url }} \
+                  -F http_session_timeout=900 -F http_session_local=on \
+                  -F http_cxn_timeout=90 -F http_tcp_backlog=64 \
+                  -F max_processes=200 -F min_idle_processes=20 -F max_idle_processes=50 \
+                  -F share_database=on \
+                  -F autodel_settings=1 \
+                  -F autodel_prj_files_size_limit={{ mul .Values.launchd.storage 819 }} \
+                  -F autodel_prj_files_limit=1 \
+                  -F autodel_prj_files_limit_scope=1
+                echo -e "\Create the launchd group.\n"
+                /opt/codesonar/third-party/curl/inst/bin/curl -X POST \
+                  -u "Administrator:${CSHUB_PASSWORD}" -k -o /dev/null \
+                  {{ include "hub.tempBaseUri" . }}/manage_launchd.html \
+                  -F new_launchdgroup_name={{ include "launchd.group" . }}
+                echo -e "\nStop the temporary Hub instance.\n"
+                codesonar hub-stop {{ include "hub.tempBaseUri" . }} \
+                  -auth password -hubuser Administrator -hubpwfile {{ $configDirectory }}/password
+              fi
+              chmod 700 {{ $dataDirectory }}/pgdata
+              chmod 600 {{ $dataDirectory }}/dbpass
+              echo -e "\nUpgrade the Hub (if needed.)\n"
+              cshub create {{ $dataDirectory }} {{ include "hub.listeningAddress" . }}
+              echo -e "\nStart the Hub.\n"
+              cshub start {{ $dataDirectory }}
+          ports:
+            - containerPort: {{ include "hub.internalPort" . }}
+          livenessProbe:
+            initialDelaySeconds: 600
+            tcpSocket:
+              port: {{ include "hub.internalPort" . }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ include "hub.internalPort" . }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ .Release.Namespace }}
+  name: {{ include "hub.name" . }}
+  labels:
+    app.kubernetes.io/part-of: codesonar
+    app.kubernetes.io/name: hub
+    app.kubernetes.io/instance: {{ include "hub.name" . }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/instance: {{ include "hub.name" . }}
+  ports:
+    - protocol: TCP
+      port: {{ include "hub.externalPort" . }}
+      targetPort: {{ include "hub.internalPort" . }}

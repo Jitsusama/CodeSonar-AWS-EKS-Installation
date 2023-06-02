@@ -1,0 +1,96 @@
+{{- $dataDirectory := "/home/codesonar/analysisdata" -}}
+{{- $configDirectory := "/etc/codesonar" }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  namespace: {{ .Release.Namespace }}
+  name: {{ include "launchd.name" . }}
+  labels:
+    app.kubernetes.io/part-of: codesonar
+    app.kubernetes.io/name: launchd
+    app.kubernetes.io/instance: {{ include "launchd.name" . }}
+spec:
+  replicas: {{ .Values.launchd.replicas }}
+  serviceName: {{ include "launchd.name" . }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ include "launchd.name" . }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: {{ .Values.launchd.storage -}}Gi
+          limits:
+            storage: {{ .Values.launchd.storage -}}Gi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: codesonar
+        app.kubernetes.io/name: launchd
+        app.kubernetes.io/instance: {{ include "launchd.name" . }}
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/os: linux
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "hub.name" . }}
+      containers:
+        - name: service
+          image: {{ .Values.launchd.image }}
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: {{ .Values.launchd.cpu }}
+              memory: {{ .Values.launchd.ram }}Gi
+              ephemeral-storage: 1Mi
+            limits:
+              cpu: {{ .Values.launchd.cpu }}
+              memory: {{ .Values.launchd.ram }}Gi
+              ephemeral-storage: 1Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ ALL ]
+          volumeMounts:
+            - name: data
+              mountPath: {{ $dataDirectory }}
+            - name: config
+              mountPath: {{ $configDirectory }}
+          env:
+            - name: GTHTTP_DONT_VERIFY_HTTPS_HOSTNAME
+              value: "1"
+            - name: CS_DO_NOT_START_LAUNCHD
+              value: "1"
+          workingDir: {{ $dataDirectory }}
+          command:
+            - /tini
+            - "--"
+          args:
+            - bash
+            - "-c"
+            - |
+              export CSHUB_PASSWORD=$(cat {{ $configDirectory }}/password)
+              touch {{ $dataDirectory }}/.ldhome
+              echo -e "Wait for the CodeSonar hub to be reachable.\n"
+              until codesonar hub-info -force {{ include "hub.baseUri" . }}; do
+                sleep 15
+              done
+              echo -e "\nInstall the CodeSonar launchd service.\n"
+              codesonar install-launchd -foreground \
+                -auth password -hubuser Administrator -hubpwfile {{ $configDirectory }}/password \
+                -launchd-group /{{ include "launchd.group" . }} \
+                -launchd-home {{ $dataDirectory }} \
+                -launchd-quota {{ mul .Values.launchd.storage 819 }} \
+                {{ include "hub.baseUri" . }}

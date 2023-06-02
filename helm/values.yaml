@@ -1,0 +1,41 @@
+launchd:
+  # Image to pull that includes the launchd software.
+  image: docker.io/some/image:tag
+  # How many launchd daemons to split the load across.
+  replicas: 1
+  # vCPUs (fractional values accepted) to allocate to the instance.
+  cpu: 2
+  # RAM (in Gi) to allocate to the instance.
+  ram: 16
+  # Disk storage (in Gi) to set aside for project files.
+  storage: 128
+
+hub:
+  # Image to pull that includes the hub software.
+  image: docker.io/some/image:tag
+  # vCPUs (fractional values accepted) to allocate to the instance.
+  cpu: 2
+  # RAM (in Gi) to allocate to the instance.
+  ram: 16
+  # Disk storage (in Gi) to set aside for the database.
+  storage: 128
+  # Port number to expose on service.
+  port: 7340
+  # Password for the 'Administrator' user.
+  password:
+  # PEM formatted private certificate key.
+  tls_cert:
+  # Public URL of the hub web UI (used in email links and for sso)
+  url: https://somewhere.com
+  # SMTP Client Configuration
+  smtp:
+    # Whether the SMTP client is enabled.
+    enabled: false
+    # SMTP Server Host
+    host: example.com
+    # SMTP Server Port
+    port: 25
+    # E-mail From Address (defaults to notifications@hub.url when empty)
+    address: codesonar@example.com
+    # Message Sending Timeout
+    timeout: 60

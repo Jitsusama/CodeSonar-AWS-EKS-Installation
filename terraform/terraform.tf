@@ -20,15 +20,15 @@ locals {
 
 # Helm Repository Configuration
 locals {
-  helm_repository_uri      = ""
-  helm_repository_user     = ""
-  helm_repository_password = ""
+  helm_repository_uri      = "https://helm.repo"
+  helm_repository_user     = "username"
+  helm_repository_password = "password"
 }
 
 # CodeSonar Image Configuration
 locals {
-  codesonar_launchd_image = ""
-  codesonar_hub_image     = ""
+  codesonar_launchd_image = "docker.hub/grammatech/codesonar-launchd:7.3p1"
+  codesonar_hub_image     = "docker.hub/grammatech/codesonar-hub:7.3p1"
 }
 
 terraform {

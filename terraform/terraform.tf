@@ -326,7 +326,6 @@ variable "CODESONAR_ADMIN_PASSWORD" {
 }
 
 # The CodeSonar Hub.
-# Docs: https://kochsource.io/molex-isbu/services/codesonar/-/tree/main/chart
 resource "helm_release" "codesonar" {
   name      = "codesonar"
   namespace = local.k8s_namespace
